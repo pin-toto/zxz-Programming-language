@@ -7,6 +7,16 @@
 #define MAX_LINE 1024
 #define MAX_STRING 256
 #define MAX_EXPR 512
+#define MAX_MATRIX 100
+
+typedef struct {
+    double data[MAX_MATRIX][MAX_MATRIX];
+    int rows;
+    int cols;
+} Matrix;
+
+Matrix matrix_stack[MAX_MATRIX];
+int matrix_stack_ptr = 0;
 
 char* trim(char* str) {
     while (isspace((unsigned char)*str)) str++;
@@ -32,8 +42,160 @@ void replace_operators(char* expr) {
     }
 }
 
-double evaluate_expression(char* expr) {
+Matrix create_matrix(int rows, int cols) {
+    Matrix m;
+    m.rows = rows;
+    m.cols = cols;
+    for(int i = 0; i < rows; i++) {
+        for(int j = 0; j < cols; j++) {
+            m.data[i][j] = 0;
+        }
+    }
+    return m;
+}
 
+void print_matrix(Matrix m) {
+    printf("[");
+    for(int i = 0; i < m.rows; i++) {
+        if(i > 0) printf(" ");
+        printf("[");
+        for(int j = 0; j < m.cols; j++) {
+            if(m.data[i][j] == (int)m.data[i][j]) {
+                printf("%d", (int)m.data[i][j]);
+            } else {
+                printf("%g", m.data[i][j]);
+            }
+            if(j < m.cols - 1) printf(",");
+        }
+        printf("]");
+        if(i < m.rows - 1) printf(",\n");
+    }
+    printf("]\n");
+}
+
+Matrix matrix_add(Matrix a, Matrix b) {
+    if(a.rows != b.rows || a.cols != b.cols) {
+        printf("Error: Matrix dimensions must match for addition\n");
+        exit(1);
+    }
+    Matrix result = create_matrix(a.rows, a.cols);
+    for(int i = 0; i < a.rows; i++) {
+        for(int j = 0; j < a.cols; j++) {
+            result.data[i][j] = a.data[i][j] + b.data[i][j];
+        }
+    }
+    return result;
+}
+
+Matrix matrix_sub(Matrix a, Matrix b) {
+    if(a.rows != b.rows || a.cols != b.cols) {
+        printf("Error: Matrix dimensions must match for subtraction\n");
+        exit(1);
+    }
+    Matrix result = create_matrix(a.rows, a.cols);
+    for(int i = 0; i < a.rows; i++) {
+        for(int j = 0; j < a.cols; j++) {
+            result.data[i][j] = a.data[i][j] - b.data[i][j];
+        }
+    }
+    return result;
+}
+
+Matrix matrix_mul(Matrix a, Matrix b) {
+    if(a.cols != b.rows) {
+        printf("Error: Invalid matrix dimensions for multiplication\n");
+        exit(1);
+    }
+    Matrix result = create_matrix(a.rows, b.cols);
+    for(int i = 0; i < a.rows; i++) {
+        for(int j = 0; j < b.cols; j++) {
+            for(int k = 0; k < a.cols; k++) {
+                result.data[i][j] += a.data[i][k] * b.data[k][j];
+            }
+        }
+    }
+    return result;
+}
+
+Matrix parse_matrix(char* expr) {
+    char* start = strchr(expr, '[');
+    if(!start) {
+        printf("Error: Invalid matrix format\n");
+        exit(1);
+    }
+    
+    Matrix m;
+    int row = 0, col = 0;
+    char* ptr = start + 1;
+    
+    while(*ptr && *ptr != ']') {
+        while(isspace(*ptr)) ptr++;
+        
+        if(*ptr == '[') {
+            ptr++;
+            col = 0;
+            while(*ptr && *ptr != ']') {
+                while(isspace(*ptr)) ptr++;
+                if(isdigit(*ptr) || *ptr == '.' || *ptr == '-') {
+                    m.data[row][col++] = atof(ptr);
+                    while(isdigit(*ptr) || *ptr == '.' || *ptr == '-') ptr++;
+                }
+                while(isspace(*ptr)) ptr++;
+                if(*ptr == ',') ptr++;
+            }
+            if(*ptr == ']') {
+                m.cols = col;
+                row++;
+                ptr++;
+            }
+        }
+        if(*ptr == ',') ptr++;
+    }
+    m.rows = row;
+    return m;
+}
+
+// Declaration of evaluate_expression before use
+double evaluate_expression(char* expr);
+
+double evaluate_trig(char* expr) {
+    if(strstr(expr, "sin(")) {
+        char* start = strstr(expr, "sin(") + 4;
+        char* end = strchr(start, ')');
+        if(end) {
+            char inner[MAX_EXPR];
+            strncpy(inner, start, end - start);
+            inner[end - start] = '\0';
+            double val = evaluate_expression(inner);
+            return sin(val);
+        }
+    }
+    if(strstr(expr, "cos(")) {
+        char* start = strstr(expr, "cos(") + 4;
+        char* end = strchr(start, ')');
+        if(end) {
+            char inner[MAX_EXPR];
+            strncpy(inner, start, end - start);
+            inner[end - start] = '\0';
+            double val = evaluate_expression(inner);
+            return cos(val);
+        }
+    }
+    if(strstr(expr, "tan(")) {
+        char* start = strstr(expr, "tan(") + 4;
+        char* end = strchr(start, ')');
+        if(end) {
+            char inner[MAX_EXPR];
+            strncpy(inner, start, end - start);
+            inner[end - start] = '\0';
+            double val = evaluate_expression(inner);
+            return tan(val);
+        }
+    }
+    return 0;
+}
+
+double evaluate_expression(char* expr) {
     char clean_expr[MAX_EXPR];
     int j = 0;
     for (int i = 0; expr[i] != '\0'; i++) {
@@ -44,6 +206,41 @@ double evaluate_expression(char* expr) {
     clean_expr[j] = '\0';
     
     replace_operators(clean_expr);
+    
+    if(strstr(clean_expr, "sin(") || strstr(clean_expr, "cos(") || strstr(clean_expr, "tan(")) {
+        return evaluate_trig(clean_expr);
+    }
+    
+    if(strstr(clean_expr, "[[") || strstr(clean_expr, "[")) {
+        Matrix result;
+        if(strstr(clean_expr, "+")) {
+            char* plus = strchr(clean_expr, '+');
+            *plus = '\0';
+            Matrix a = parse_matrix(clean_expr);
+            Matrix b = parse_matrix(plus + 1);
+            result = matrix_add(a, b);
+        }
+        else if(strstr(clean_expr, "-")) {
+            char* minus = strchr(clean_expr, '-');
+            *minus = '\0';
+            Matrix a = parse_matrix(clean_expr);
+            Matrix b = parse_matrix(minus + 1);
+            result = matrix_sub(a, b);
+        }
+        else if(strstr(clean_expr, "*")) {
+            char* mul = strchr(clean_expr, '*');
+            *mul = '\0';
+            Matrix a = parse_matrix(clean_expr);
+            Matrix b = parse_matrix(mul + 1);
+            result = matrix_mul(a, b);
+        }
+        else {
+            result = parse_matrix(clean_expr);
+        }
+        
+        matrix_stack[matrix_stack_ptr++] = result;
+        return 0;
+    }
     
     char* open_paren;
     while ((open_paren = strrchr(clean_expr, '(')) != NULL) {
@@ -121,7 +318,6 @@ double evaluate_expression(char* expr) {
     
     char* ptr = clean_expr;
     while (*ptr) {
-
         if (*ptr == '-' && (ptr == clean_expr || !isdigit(*(ptr-1)) && *(ptr-1) != '.')) {
             char* start = ptr;
             char num[MAX_EXPR] = {0};
@@ -245,6 +441,15 @@ int execute_print(char* line) {
     while (isspace((unsigned char)*after_expr)) after_expr++;
     if (*after_expr != '\0') return 0;
     
+    if(strstr(expr, "[[") || strstr(expr, "[")) {
+        evaluate_expression(expr);
+        if(matrix_stack_ptr > 0) {
+            print_matrix(matrix_stack[matrix_stack_ptr - 1]);
+            matrix_stack_ptr--;
+        }
+        return 1;
+    }
+    
     double result = evaluate_expression(expr);
     
     if (result == (int)result) {
@@ -255,7 +460,6 @@ int execute_print(char* line) {
     
     return 1;
 }
-
 
 int check_start(char* line) {
     char* trimmed = trim(line);
@@ -274,12 +478,17 @@ int check_end(char* line) {
 }
 
 void show_help() {
-    printf("ZXZ Interpreter v2.0\n");
+    printf("ZXZ Interpreter v3.0\n");
     printf("Usage: zxzrun <filename.zxz>\n");
+    printf("Features:\n");
+    printf("  - Matrix operations: +, -, *\n");
+    printf("  - Trigonometric functions: sin(), cos(), tan()\n");
+    printf("  - Example: zxz.cout/[[1,2],[3,4]] + [[5,6],[7,8]]/;\n");
+    printf("  - Example: zxz.cout/sin(3.14)/;\n");
 }
 
 void show_version() {
-    printf("ZXZ Interpreter v2.0\n");
+    printf("ZXZ Interpreter v3.0\n");
 }
 
 int main(int argc, char* argv[]) {
